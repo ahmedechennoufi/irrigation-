@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0C4A6E">
+  <title>Agro Berry — Suivi Irrigation</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💧</text></svg>">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0}
+    body{font-family:'Plus Jakarta Sans',system-ui,-apple-system,sans-serif;background:#F0F9FF;overscroll-behavior:none;color:#1E293B}
+    body.dark{background:#0C1222;color:#E2E8F0}
+    ::-webkit-scrollbar{width:3px;height:3px}
+    ::-webkit-scrollbar-thumb{background:#94A3B8;border-radius:4px}
+    @keyframes slideDown{from{opacity:0;transform:translate(-50%,-20px)}to{opacity:1;transform:translate(-50%,0)}}
+    @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(14,165,233,0.4)}70%{box-shadow:0 0 0 8px rgba(14,165,233,0)}}
+    input,select,textarea,button{font-family:inherit}
+    .glass{background:rgba(255,255,255,0.85);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+    .dark .glass{background:rgba(12,18,34,0.85)}
+    table{width:100%;border-collapse:collapse}
+    th{text-align:left}
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script type="text/babel">
+const{useState,useEffect,useMemo}=React;
+const VER="1.0.0";
+
+const GROUPS=[
+  {id:"hls",name:"Hors Sol",icon:"🫐",color:"#3B82F6",station:"SF1",sections:["AG1","AG2","AG3a","AG3b"]},
+  {id:"sol",name:"Sol",icon:"🫐",color:"#DC2626",station:"SF2",sections:["AG4","AG5","AG6"]},
+  {id:"fraise",name:"Fraise",icon:"🍓",color:"#16A34A",station:"SF2",sections:["S1","S2","S3"]}
+];
+
+const SECTIONS={
+  AG1:{name:"AG1",fullName:"Myrtille HLS",area:"3.00 ha",date:"Sept 2025",group:"hls",color:"#3B82F6",parcelles:["V13","V14","V15","V16","V9","V6"]},
+  AG2:{name:"AG2",fullName:"Myrtille HLS",area:"2.60 ha",date:"Oct 2025",group:"hls",color:"#6366F1",parcelles:["V17","V18","V19"]},
+  AG3a:{name:"AG3a",fullName:"Myrtille HLS (2024)",area:"1.80 ha",date:"Juil 2024",group:"hls",color:"#8B5CF6",parcelles:["V3","V5","V6","V12","V8","V9"]},
+  AG3b:{name:"AG3b",fullName:"Myrtille HLS (2023)",area:"2.00 ha",date:"Jan 2023",group:"hls",color:"#7C3AED",parcelles:["V10","V11","V16","V17"]},
+  AG4:{name:"AG4",fullName:"Myrtille Sol",area:"6.00 ha",date:"Jan 2023",group:"sol",color:"#DC2626",parcelles:["V1","V2","V4","V5","V7","V12","V13","V15","V19","V20","V21","V18"]},
+  AG5:{name:"AG5",fullName:"Myrtille Sol",area:"2.70 ha",date:"Oct 2011",group:"sol",color:"#E11D48",parcelles:["V5","V6","V9","V10","V11"]},
+  AG6:{name:"AG6",fullName:"Myrtille Sol",area:"4.00 ha",date:"Avr 2013",group:"sol",color:"#EA580C",parcelles:["V31","V32","V33","V34","V35","V36"]},
+  S1:{name:"S1",fullName:"Fraise",area:"5.50 ha",date:"Oct 2025",group:"fraise",color:"#16A34A",parcelles:["V1","V2","V3","V4","V5","V6","V7","V8","V9"]},
+  S2:{name:"S2",fullName:"Fraise",area:"6.60 ha",date:"Oct 2025",group:"fraise",color:"#059669",parcelles:["V10","V11","V12","V13","V14","V15","V16","V17","V18"]},
+  S3:{name:"S3",fullName:"Fraise",area:"3.80 ha",date:"Oct 2025",group:"fraise",color:"#0D9488",parcelles:["V19","V20"]}
+};
+
+const PRODUCTS=["Acide Nitrique","Acide Phosphorique","Sulfate de Potasse","Nitrate de Calcium","Nitrate de Potasse","Sulfate de Magnésium","MAP","MKP","Fer EDDHA","Acide Citrique","Oligo-éléments","Correcteur pH","Autre"];
+
+const gid=()=>Date.now().toString(36)+Math.random().toString(36).substr(2);
+const fD=d=>new Date(d).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"numeric"});
+const fDT=d=>new Date(d).toLocaleString("fr-FR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+const fH=d=>new Date(d).toLocaleString("fr-FR",{hour:"2-digit",minute:"2-digit"});
+const isToday=d=>{const t=new Date(),dd=new Date(d);return t.toDateString()===dd.toDateString()};
+const isThisWeek=d=>{const now=new Date(),dd=new Date(d),diff=(now-dd)/(864e5);return diff>=0&&diff<7};
+const timeAgo=d=>{const m=Math.floor((new Date()-new Date(d))/6e4);if(m<1)return"à l'instant";if(m<60)return"il y a "+m+"min";const h=Math.floor(m/60);if(h<24)return"il y a "+h+"h";return"il y a "+Math.floor(h/24)+"j"};
+
+function ld(k,f){try{const d=localStorage.getItem("irr_"+k);return d?JSON.parse(d):f}catch(e){return f}}
+function sv(k,d){try{localStorage.setItem("irr_"+k,JSON.stringify(d))}catch(e){console.error("Storage:",e)}}
+
+function exportExcel(injections){
+  const BOM="\uFEFF";
+  const hdr=["Date","Heure","Station","Groupe","Section(s)","Produit","Dose","EC (mS/cm)","pH","Durée (min)","Volume (m³)","Notes","Enregistré le"];
+  const rows=injections.sort((a,b)=>new Date(b.date)-new Date(a.date)).map(r=>{
+    const grp=GROUPS.find(g=>g.sections.some(s=>r.sections.includes(s)));
+    return[fD(r.date),r.time||"",r.station,grp?grp.name:"",r.sections.join(", "),r.product,r.dose,r.ec||"",r.ph||"",r.duration||"",r.volume||"",r.notes||"",fDT(r.at)]
+  });
+  const esc=v=>{const s=String(v||"");return s.includes(",")||s.includes('"')||s.includes("\n")?'"'+s.replace(/"/g,'""')+'"':s};
+  const csv=BOM+[hdr.map(esc).join(","),...rows.map(r=>r.map(esc).join(","))].join("\n");
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+  a.download="irrigation-agro-berry-"+new Date().toISOString().split("T")[0]+".csv";a.click();
+}
+
+function App(){
+  const[injections,setInj]=useState(()=>ld("injections",[]));
+  const[dark,setDark]=useState(()=>ld("dark",false));
+  const[page,setPage]=useState("dash");
+  const[toast,setToast]=useState(null);
+  const[showForm,setShowForm]=useState(false);
+
+  useEffect(()=>{sv("injections",injections)},[injections]);
+  useEffect(()=>{sv("dark",dark);dark?document.body.classList.add("dark"):document.body.classList.remove("dark")},[dark]);
+
+  const t=(m,tp)=>{setToast({m,tp});setTimeout(()=>setToast(null),2500)};
+  const addInj=r=>{setInj(p=>[{...r,id:gid(),at:new Date().toISOString()},...p]);t("Injection enregistrée ✓");setShowForm(false)};
+  const delInj=id=>{setInj(p=>p.filter(r=>r.id!==id));t("Supprimé")};
+
+  const bg=dark?"#0C1222":"#F0F9FF",cbg=dark?"#1E293B":"#fff",ctx=dark?"#E2E8F0":"#1E293B",stx=dark?"#94A3B8":"#64748B",bd=dark?"#334155":"#E2E8F0";
+  const th={bg,cbg,ctx,stx,bd,dark};
+
+  return React.createElement("div",{style:{minHeight:"100vh",background:bg,color:ctx,paddingBottom:72}},
+    toast&&React.createElement("div",{style:{position:"fixed",top:16,left:"50%",transform:"translateX(-50%)",zIndex:9999,padding:"12px 24px",borderRadius:14,background:toast.tp==="err"?"#EF4444":"#0EA5E9",color:"#fff",fontWeight:600,fontSize:14,boxShadow:"0 12px 40px rgba(0,0,0,0.3)",animation:"slideDown 0.3s"}},toast.m),
+
+    // HEADER
+    React.createElement("header",{style:{background:"linear-gradient(135deg,#0C4A6E,#0369A1)",padding:"14px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}},
+      React.createElement("div",{style:{display:"flex",alignItems:"center",gap:10}},
+        React.createElement("div",{style:{width:34,height:34,borderRadius:10,background:"linear-gradient(135deg,#0EA5E9,#0284C7)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:17}},"💧"),
+        React.createElement("div",null,
+          React.createElement("h1",{style:{color:"#fff",fontSize:16,fontWeight:800,margin:0,letterSpacing:"-0.3px"}},"AGRO BERRY"),
+          React.createElement("p",{style:{color:"#7DD3FC",fontSize:9,margin:0}},"Suivi Irrigation • Ferme Zaouia"))),
+      React.createElement("button",{onClick:()=>setDark(!dark),style:{background:"rgba(255,255,255,0.08)",border:"none",color:"#fff",padding:8,borderRadius:10,fontSize:16,cursor:"pointer",width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center"}},dark?"☀️":"🌙")),
+
+    // MAIN
+    React.createElement("main",{style:{padding:"10px 12px",maxWidth:800,margin:"0 auto"}},
+      page==="dash"&&React.createElement(Dashboard,{...th,injections,delInj,showForm,setShowForm,addInj}),
+      page==="hls"&&React.createElement(GroupView,{...th,group:GROUPS[0],injections,delInj,showForm,setShowForm,addInj}),
+      page==="sol"&&React.createElement(GroupView,{...th,group:GROUPS[1],injections,delInj,showForm,setShowForm,addInj}),
+      page==="fraise"&&React.createElement(GroupView,{...th,group:GROUPS[2],injections,delInj,showForm,setShowForm,addInj}),
+      page==="history"&&React.createElement(History,{...th,injections,delInj})),
+
+    // BOTTOM NAV
+    React.createElement("nav",{className:"glass",style:{position:"fixed",bottom:0,left:0,right:0,display:"flex",justifyContent:"space-around",padding:"6px 0 8px",borderTop:"1px solid "+(dark?"#1E293B":"#E2E8F0"),zIndex:100}},
+      [{k:"dash",l:"Dashboard",i:"📊",ac:"#0EA5E9"},{k:"hls",l:"Hors Sol",i:"🫐",ac:"#3B82F6"},{k:"sol",l:"Sol",i:"🌱",ac:"#DC2626"},{k:"fraise",l:"Fraise",i:"🍓",ac:"#16A34A"},{k:"history",l:"Historique",i:"📜",ac:"#8B5CF6"}].map(tab=>
+        React.createElement("button",{key:tab.k,onClick:()=>setPage(tab.k),style:{background:"transparent",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"4px 6px",cursor:"pointer",borderRadius:10,color:page===tab.k?tab.ac:stx,fontWeight:page===tab.k?700:500,position:"relative"}},
+          page===tab.k&&React.createElement("div",{style:{position:"absolute",top:-6,width:24,height:3,borderRadius:2,background:tab.ac}}),
+          React.createElement("span",{style:{fontSize:17}},tab.i),React.createElement("span",{style:{fontSize:8}},tab.l)))),
+
+    showForm&&React.createElement(InjectionForm,{...th,onSubmit:addInj,onClose:()=>setShowForm(false)}));
+}
+
+// ===== DASHBOARD =====
+function Dashboard({bg,cbg,ctx,stx,bd,dark,injections,delInj,showForm,setShowForm,addInj}){
+  const today=injections.filter(r=>isToday(r.at));
+  const week=injections.filter(r=>isThisWeek(r.at));
+  const recent=today.length>0?today:week.slice(0,8);
+
+  const grpStats=GROUPS.map(g=>{
+    const gi=injections.filter(r=>r.sections.some(s=>g.sections.includes(s)));
+    const gt=gi.filter(r=>isToday(r.at));
+    const gw=gi.filter(r=>isThisWeek(r.at));
+    const lastInj=gi.length>0?gi[0]:null;
+    return{...g,total:gi.length,today:gt.length,week:gw.length,last:lastInj};
+  });
+
+  return React.createElement("div",{style:{animation:"fadeIn 0.3s"}},
+    // FAB
+    React.createElement("button",{onClick:()=>setShowForm(true),style:{position:"fixed",bottom:80,right:16,width:56,height:56,borderRadius:16,border:"none",background:"linear-gradient(135deg,#0EA5E9,#0284C7)",color:"#fff",fontSize:24,cursor:"pointer",zIndex:90,boxShadow:"0 4px 20px rgba(14,165,233,0.4)",display:"flex",alignItems:"center",justifyContent:"center"}},"+"),
+
+    // KPIs
+    React.createElement("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:14}},
+      [{i:"💧",v:injections.length,l:"Total",c:"#0EA5E9",b:dark?"#0C1A2E":"#E0F2FE"},{i:"📅",v:today.length,l:"Aujourd'hui",c:"#10B981",b:dark?"#0C1E17":"#D1FAE5"},{i:"📊",v:week.length,l:"Cette semaine",c:"#8B5CF6",b:dark?"#1A1028":"#EDE9FE"}].map((c,i)=>
+        React.createElement("div",{key:i,style:{background:c.b,borderRadius:14,padding:"12px 6px",textAlign:"center",border:"1px solid "+bd}},
+          React.createElement("div",{style:{fontSize:16}},c.i),React.createElement("div",{style:{fontSize:24,fontWeight:800,color:c.c,marginTop:2}},c.v),React.createElement("div",{style:{fontSize:9,color:c.c,fontWeight:600}},c.l)))),
+
+    // GROUPS OVERVIEW
+    React.createElement("h3",{style:{fontSize:14,fontWeight:700,marginBottom:10}},"⚡ Aperçu par groupe"),
+    React.createElement("div",{style:{display:"flex",flexDirection:"column",gap:8,marginBottom:14}},
+      grpStats.map(g=>React.createElement("div",{key:g.id,style:{background:cbg,borderRadius:16,padding:14,border:"1px solid "+bd,borderLeft:"4px solid "+g.color}},
+        React.createElement("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}},
+          React.createElement("div",{style:{display:"flex",alignItems:"center",gap:8}},
+            React.createElement("span",{style:{fontSize:20}},g.icon),
+            React.createElement("div",null,
+              React.createElement("div",{style:{fontWeight:700,fontSize:14,color:g.color}},g.name),
+              React.createElement("div",{style:{fontSize:10,color:stx}},"Station "+g.station+" • "+g.sections.length+" sections"))),
+          React.createElement("div",{style:{display:"flex",gap:4}},
+            React.createElement("span",{style:{padding:"4px 10px",borderRadius:20,fontSize:10,fontWeight:700,background:g.color+"18",color:g.color}},g.today+" auj."),
+            React.createElement("span",{style:{padding:"4px 10px",borderRadius:20,fontSize:10,fontWeight:700,background:dark?"#334155":"#F1F5F9",color:stx}},g.total+" total"))),
+        g.last&&React.createElement("div",{style:{fontSize:11,color:stx,padding:"8px 10px",background:dark?"#1E293B":"#F8FAFC",borderRadius:10,marginTop:4}},
+          "Dernier: ",React.createElement("strong",null,g.last.product)," • "+g.last.dose," — ",React.createElement("span",{style:{color:g.color}},timeAgo(g.last.at)))))),
+
+    // RECENT INJECTIONS
+    React.createElement("h3",{style:{fontSize:14,fontWeight:700,marginBottom:10}},today.length>0?"💧 Aujourd'hui ("+today.length+")":"💧 Cette semaine"),
+    recent.length===0?
+      React.createElement("div",{style:{textAlign:"center",padding:40,background:cbg,borderRadius:16,border:"1px solid "+bd}},
+        React.createElement("div",{style:{fontSize:40}},"💧"),
+        React.createElement("p",{style:{fontWeight:600,color:stx,marginTop:8}},"Aucune injection récente"),
+        React.createElement("button",{onClick:()=>setShowForm(true),style:{marginTop:12,padding:"10px 20px",borderRadius:12,border:"none",background:"linear-gradient(135deg,#0EA5E9,#0284C7)",color:"#fff",fontWeight:600,fontSize:12,cursor:"pointer"}},"+ Ajouter une injection")):
+    React.createElement("div",{style:{display:"flex",flexDirection:"column",gap:8}},
+      recent.map(r=>React.createElement(InjCard,{key:r.id,r,dark,cbg,ctx,stx,bd,onDel:delInj}))));
+}
+
+// ===== INJECTION CARD =====
+function InjCard({r,dark,cbg,ctx,stx,bd,onDel}){
+  const grp=GROUPS.find(g=>g.sections.some(s=>r.sections.includes(s)));
+  const gc=grp?grp.color:"#64748B";
+  return React.createElement("div",{style:{background:cbg,border:"1px solid "+bd,borderLeft:"4px solid "+gc,borderRadius:16,padding:14}},
+    React.createElement("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:6}},
+      React.createElement("div",null,
+        React.createElement("div",{style:{display:"flex",alignItems:"center",gap:6,marginBottom:3}},
+          React.createElement("span",{style:{fontWeight:700,fontSize:13,color:gc}},r.sections.join(", ")),
+          React.createElement("span",{style:{padding:"2px 8px",borderRadius:20,fontSize:9,fontWeight:600,background:gc+"18",color:gc}},r.station)),
+        React.createElement("div",{style:{fontSize:15,fontWeight:700,color:dark?"#7DD3FC":"#0369A1"}},r.product),
+        React.createElement("div",{style:{fontSize:12,color:stx}},"📏 "+r.dose)),
+      React.createElement("div",{style:{display:"flex",alignItems:"center",gap:4}},
+        React.createElement("span",{style:{fontSize:9,color:stx}},timeAgo(r.at)),
+        React.createElement("button",{onClick:()=>onDel(r.id),style:{background:"#FEF2F2",borderRadius:8,border:"1px solid #FECACA",fontSize:12,cursor:"pointer",padding:"3px 6px"}},"🗑️"))),
+    React.createElement("div",{style:{display:"flex",flexWrap:"wrap",gap:6,marginTop:4}},
+      r.ec&&React.createElement("span",{style:{padding:"3px 10px",borderRadius:20,fontSize:10,fontWeight:600,background:dark?"#1E293B":"#F0F9FF",color:"#0EA5E9",border:"1px solid "+(dark?"#334155":"#BAE6FD")}},"EC: "+r.ec),
+      r.ph&&React.createElement("span",{style:{padding:"3px 10px",borderRadius:20,fontSize:10,fontWeight:600,background:dark?"#1E293B":"#FEF9C3",color:"#CA8A04",border:"1px solid "+(dark?"#334155":"#FDE047")}},"pH: "+r.ph),
+      r.duration&&React.createElement("span",{style:{padding:"3px 10px",borderRadius:20,fontSize:10,fontWeight:600,background:dark?"#1E293B":"#F0FDF4",color:"#16A34A",border:"1px solid "+(dark?"#334155":"#BBF7D0")}},"⏱ "+r.duration+" min"),
+      r.volume&&React.createElement("span",{style:{padding:"3px 10px",borderRadius:20,fontSize:10,fontWeight:600,background:dark?"#1E293B":"#EDE9FE",color:"#7C3AED",border:"1px solid "+(dark?"#334155":"#DDD6FE")}},"💧 "+r.volume+" m³")),
+    r.notes&&React.createElement("div",{style:{fontSize:11,color:stx,marginTop:6,padding:"6px 8px",background:dark?"#1E293B":"#F8FAFC",borderRadius:8,fontStyle:"italic"}},"📝 "+r.notes));
+}
+
+// ===== GROUP VIEW =====
+function GroupView({bg,cbg,ctx,stx,bd,dark,group,injections,delInj,showForm,setShowForm,addInj}){
+  const gi=injections.filter(r=>r.sections.some(s=>group.sections.includes(s)));
+  const today=gi.filter(r=>isToday(r.at));
+  const week=gi.filter(r=>isThisWeek(r.at));
+
+  const secStats=group.sections.map(sk=>{
+    const sec=SECTIONS[sk];
+    const si=gi.filter(r=>r.sections.includes(sk));
+    const st=si.filter(r=>isToday(r.at));
+    const last=si.length>0?si[0]:null;
+    return{sk,sec,total:si.length,today:st.length,last};
+  });
+
+  return React.createElement("div",{style:{animation:"fadeIn 0.3s"}},
+    React.createElement("button",{onClick:()=>setShowForm(true),style:{position:"fixed",bottom:80,right:16,width:56,height:56,borderRadius:16,border:"none",background:"linear-gradient(135deg,"+group.color+","+group.color+"CC)",color:"#fff",fontSize:24,cursor:"pointer",zIndex:90,boxShadow:"0 4px 20px "+group.color+"66",display:"flex",alignItems:"center",justifyContent:"center"}},"+"),
+
+    // Header
+    React.createElement("div",{style:{background:cbg,borderRadius:16,padding:16,border:"1px solid "+bd,marginBottom:14,borderLeft:"4px solid "+group.color}},
+      React.createElement("div",{style:{display:"flex",alignItems:"center",gap:10,marginBottom:8}},
+        React.createElement("span",{style:{fontSize:28}},group.icon),
+        React.createElement("div",null,
+          React.createElement("h2",{style:{fontSize:18,fontWeight:800,color:group.color,margin:0}},group.name),
+          React.createElement("div",{style:{fontSize:11,color:stx}},"Station "+group.station+" • "+group.sections.length+" sections"))),
+      React.createElement("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}},
+        [{v:gi.length,l:"Total",c:group.color},{v:today.length,l:"Aujourd'hui",c:"#10B981"},{v:week.length,l:"Semaine",c:"#8B5CF6"}].map((c,i)=>
+          React.createElement("div",{key:i,style:{textAlign:"center",padding:8,borderRadius:10,background:dark?"#1E293B":"#F8FAFC"}},
+            React.createElement("div",{style:{fontSize:18,fontWeight:800,color:c.c}},c.v),
+            React.createElement("div",{style:{fontSize:9,color:stx,fontWeight:600}},c.l))))),
+
+    // Sections detail
+    React.createElement("h3",{style:{fontSize:14,fontWeight:700,marginBottom:10}},"📍 Détail par section"),
+    React.createElement("div",{style:{display:"flex",flexDirection:"column",gap:6,marginBottom:14}},
+      secStats.map(s=>React.createElement("div",{key:s.sk,style:{background:cbg,borderRadius:14,padding:"10px 14px",border:"1px solid "+bd,borderLeft:"3px solid "+s.sec.color,display:"flex",justifyContent:"space-between",alignItems:"center"}},
+        React.createElement("div",null,
+          React.createElement("span",{style:{fontWeight:700,fontSize:13,color:s.sec.color}},s.sec.name),
+          React.createElement("span",{style:{fontSize:10,color:stx,marginLeft:6}},s.sec.fullName+" • "+s.sec.area)),
+        React.createElement("div",{style:{display:"flex",alignItems:"center",gap:4}},
+          React.createElement("span",{style:{padding:"3px 10px",borderRadius:20,fontSize:10,fontWeight:600,background:group.color+"18",color:group.color}},s.total+" 💧"),
+          s.last&&React.createElement("span",{style:{fontSize:9,color:stx}},timeAgo(s.last.at)))))),
+
+    // Recent for this group
+    React.createElement("h3",{style:{fontSize:14,fontWeight:700,marginBottom:10}},today.length>0?"💧 Aujourd'hui ("+today.length+")":"💧 Récentes"),
+    (today.length>0?today:week.slice(0,8)).length===0?
+      React.createElement("div",{style:{textAlign:"center",padding:30,background:cbg,borderRadius:16,border:"1px solid "+bd}},
+        React.createElement("div",{style:{fontSize:36}},"💧"),
+        React.createElement("p",{style:{fontWeight:600,color:stx,marginTop:6}},"Aucune injection")):
+    React.createElement("div",{style:{display:"flex",flexDirection:"column",gap:8}},
+      (today.length>0?today:week.slice(0,8)).map(r=>React.createElement(InjCard,{key:r.id,r,dark,cbg,ctx,stx,bd,onDel:delInj}))));
+}
+
+// ===== HISTORY =====
+function History({bg,cbg,ctx,stx,bd,dark,injections,delInj}){
+  const[filter,setFilter]=useState("all");
+  const filtered=filter==="all"?injections:injections.filter(r=>r.sections.some(s=>{const grp=GROUPS.find(g=>g.sections.includes(s));return grp&&grp.id===filter}));
+
+  return React.createElement("div",{style:{animation:"fadeIn 0.3s"}},
+    React.createElement("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}},
+      React.createElement("h2",{style:{fontSize:16,fontWeight:800}},"📜 Historique ("+filtered.length+")"),
+      React.createElement("button",{onClick:()=>exportExcel(filtered),style:{padding:"8px 16px",borderRadius:12,border:"none",background:"linear-gradient(135deg,#10B981,#059669)",color:"#fff",fontWeight:600,fontSize:11,cursor:"pointer"}},"📥 Export Excel")),
+
+    // Filters
+    React.createElement("div",{style:{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}},
+      [{k:"all",l:"Tous"},{k:"hls",l:"🫐 Hors Sol"},{k:"sol",l:"🌱 Sol"},{k:"fraise",l:"🍓 Fraise"}].map(f=>
+        React.createElement("button",{key:f.k,onClick:()=>setFilter(f.k),style:{padding:"6px 14px",borderRadius:20,border:"1px solid "+(filter===f.k?"#0EA5E9":bd),background:filter===f.k?(dark?"#0C4A6E":"#E0F2FE"):"transparent",color:filter===f.k?"#0EA5E9":stx,fontWeight:filter===f.k?700:500,fontSize:11,cursor:"pointer"}},f.l))),
+
+    // Table
+    filtered.length===0?
+      React.createElement("div",{style:{textAlign:"center",padding:40,background:cbg,borderRadius:16,border:"1px solid "+bd}},
+        React.createElement("div",{style:{fontSize:40}},"📭"),
+        React.createElement("p",{style:{fontWeight:600,color:stx,marginTop:8}},"Aucune injection")):
+    React.createElement("div",{style:{background:cbg,borderRadius:16,border:"1px solid "+bd,overflow:"hidden"}},
+      React.createElement("div",{style:{overflowX:"auto"}},
+        React.createElement("table",{style:{fontSize:11}},
+          React.createElement("thead",null,
+            React.createElement("tr",{style:{background:dark?"#1E293B":"#F0F9FF"}},
+              ["Date","Section","Produit","Dose","EC","pH","Durée","Vol.",""].map((h,i)=>
+                React.createElement("th",{key:i,style:{padding:"10px 8px",fontWeight:700,color:stx,fontSize:10,borderBottom:"2px solid "+bd,whiteSpace:"nowrap"}},h)))),
+          React.createElement("tbody",null,
+            filtered.sort((a,b)=>new Date(b.date)-new Date(a.date)).map((r,i)=>{
+              const grp=GROUPS.find(g=>g.sections.some(s=>r.sections.includes(s)));
+              return React.createElement("tr",{key:r.id,style:{borderBottom:"1px solid "+bd,background:i%2===0?"transparent":(dark?"#1E293B11":"#F8FAFC")}},
+                React.createElement("td",{style:{padding:"8px",whiteSpace:"nowrap",fontWeight:500}},fD(r.date)),
+                React.createElement("td",{style:{padding:"8px"}},React.createElement("span",{style:{fontWeight:700,color:grp?grp.color:"#64748B",fontSize:10}},r.sections.join(", "))),
+                React.createElement("td",{style:{padding:"8px",fontWeight:700,color:dark?"#7DD3FC":"#0369A1"}},r.product),
+                React.createElement("td",{style:{padding:"8px"}},r.dose),
+                React.createElement("td",{style:{padding:"8px",color:"#0EA5E9"}},r.ec||"—"),
+                React.createElement("td",{style:{padding:"8px",color:"#CA8A04"}},r.ph||"—"),
+                React.createElement("td",{style:{padding:"8px"}},r.duration?r.duration+"min":"—"),
+                React.createElement("td",{style:{padding:"8px"}},r.volume?r.volume+"m³":"—"),
+                React.createElement("td",{style:{padding:"8px"}},React.createElement("button",{onClick:()=>delInj(r.id),style:{background:"#FEF2F2",borderRadius:6,border:"1px solid #FECACA",fontSize:11,cursor:"pointer",padding:"3px 6px"}},"🗑️")))}))))));
+}
+
+// ===== INJECTION FORM =====
+function InjectionForm({bg,cbg,ctx,stx,bd,dark,onSubmit,onClose}){
+  const[station,setStation]=useState("SF1");
+  const[sections,setSections]=useState([]);
+  const[product,setProduct]=useState("");
+  const[dose,setDose]=useState("");
+  const[ec,setEc]=useState("");
+  const[ph,setPh]=useState("");
+  const[duration,setDuration]=useState("");
+  const[volume,setVolume]=useState("");
+  const[notes,setNotes]=useState("");
+  const[date,setDate]=useState(new Date().toISOString().split("T")[0]);
+  const[time,setTime]=useState(new Date().toTimeString().slice(0,5));
+
+  const availSections=station==="SF1"?GROUPS[0].sections:GROUPS[1].sections.concat(GROUPS[2].sections);
+
+  const toggleSec=sk=>{setSections(p=>p.includes(sk)?p.filter(s=>s!==sk):[...p,sk])};
+  const selectAll=()=>{setSections(sections.length===availSections.length?[]:availSections.slice())};
+
+  const submit=()=>{
+    if(!product||!dose||sections.length===0){alert("Remplis Produit, Dose et au moins 1 section");return}
+    onSubmit({date,time,station,sections:sections.slice(),product,dose,ec,ph,duration,volume,notes});
+  };
+
+  const is={width:"100%",padding:"11px 12px",borderRadius:12,border:"2px solid "+bd,fontSize:13,outline:"none",background:cbg,color:ctx};
+  const lbl={fontSize:11,fontWeight:700,color:stx,marginBottom:4,display:"block"};
+
+  return React.createElement("div",{style:{position:"fixed",inset:0,zIndex:200,background:"rgba(0,0,0,0.5)",display:"flex",alignItems:"flex-end",justifyContent:"center"},onClick:onClose},
+    React.createElement("div",{style:{background:cbg,borderRadius:"20px 20px 0 0",padding:"16px 16px 30px",width:"100%",maxWidth:500,maxHeight:"90vh",overflow:"auto",animation:"fadeIn 0.3s"},onClick:e=>e.stopPropagation()},
+      React.createElement("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}},
+        React.createElement("h2",{style:{fontSize:16,fontWeight:800}},"💧 Nouvelle injection"),
+        React.createElement("button",{onClick:onClose,style:{background:dark?"#334155":"#F1F5F9",border:"none",width:32,height:32,borderRadius:10,fontSize:16,cursor:"pointer",color:ctx}},"✕")),
+
+      // Date + Time
+      React.createElement("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}},
+        React.createElement("div",null,React.createElement("label",{style:lbl},"📅 Date"),React.createElement("input",{type:"date",value:date,onChange:e=>setDate(e.target.value),style:is})),
+        React.createElement("div",null,React.createElement("label",{style:lbl},"🕐 Heure"),React.createElement("input",{type:"time",value:time,onChange:e=>setTime(e.target.value),style:is}))),
+
+      // Station
+      React.createElement("label",{style:{...lbl,marginTop:6}},"🏭 Station"),
+      React.createElement("div",{style:{display:"flex",gap:8,marginBottom:10}},
+        ["SF1","SF2"].map(s=>React.createElement("button",{key:s,onClick:()=>{setStation(s);setSections([])},style:{flex:1,padding:10,borderRadius:12,border:"2px solid "+(station===s?"#0EA5E9":bd),background:station===s?(dark?"#0C4A6E":"#E0F2FE"):"transparent",color:station===s?"#0EA5E9":stx,fontWeight:station===s?700:500,fontSize:12,cursor:"pointer"}},s+(s==="SF1"?" (HLS)":" (Sol+Fraise)")))),
+
+      // Sections
+      React.createElement("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
+        React.createElement("label",{style:{...lbl,marginTop:6}},"📍 Sections"),
+        React.createElement("button",{onClick:selectAll,style:{fontSize:10,color:"#0EA5E9",background:"none",border:"none",cursor:"pointer",fontWeight:600}},sections.length===availSections.length?"Désélectionner":"Tout sélectionner")),
+      React.createElement("div",{style:{display:"flex",flexWrap:"wrap",gap:6,marginBottom:10}},
+        availSections.map(sk=>{const sec=SECTIONS[sk];return React.createElement("button",{key:sk,onClick:()=>toggleSec(sk),style:{padding:"6px 12px",borderRadius:10,border:"2px solid "+(sections.includes(sk)?sec.color:bd),background:sections.includes(sk)?sec.color+"18":"transparent",color:sections.includes(sk)?sec.color:stx,fontWeight:sections.includes(sk)?700:500,fontSize:11,cursor:"pointer"}},sec.name+" ("+sec.area+")")})),
+
+      // Product
+      React.createElement("label",{style:{...lbl,marginTop:6}},"🧪 Produit *"),
+      React.createElement("select",{value:product,onChange:e=>setProduct(e.target.value),style:{...is,marginBottom:10}},
+        React.createElement("option",{value:""},"— Choisir —"),
+        PRODUCTS.map(p=>React.createElement("option",{key:p,value:p},p))),
+
+      // Dose
+      React.createElement("label",{style:lbl},"📏 Dose *"),
+      React.createElement("input",{placeholder:"ex: 5 L/ha, 200 g/1000L...",value:dose,onChange:e=>setDose(e.target.value),style:{...is,marginBottom:10}}),
+
+      // EC + pH
+      React.createElement("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}},
+        React.createElement("div",null,React.createElement("label",{style:lbl},"⚡ EC (mS/cm)"),React.createElement("input",{type:"number",step:"0.1",placeholder:"ex: 1.8",value:ec,onChange:e=>setEc(e.target.value),style:is})),
+        React.createElement("div",null,React.createElement("label",{style:lbl},"🧪 pH"),React.createElement("input",{type:"number",step:"0.1",placeholder:"ex: 5.8",value:ph,onChange:e=>setPh(e.target.value),style:is}))),
+
+      // Duration + Volume
+      React.createElement("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}},
+        React.createElement("div",null,React.createElement("label",{style:lbl},"⏱ Durée (min)"),React.createElement("input",{type:"number",placeholder:"ex: 45",value:duration,onChange:e=>setDuration(e.target.value),style:is})),
+        React.createElement("div",null,React.createElement("label",{style:lbl},"💧 Volume (m³)"),React.createElement("input",{type:"number",step:"0.1",placeholder:"ex: 12.5",value:volume,onChange:e=>setVolume(e.target.value),style:is}))),
+
+      // Notes
+      React.createElement("label",{style:lbl},"📝 Notes"),
+      React.createElement("textarea",{rows:2,placeholder:"Observations...",value:notes,onChange:e=>setNotes(e.target.value),style:{...is,marginBottom:14,resize:"vertical"}}),
+
+      // Submit
+      React.createElement("button",{onClick:submit,style:{width:"100%",padding:14,borderRadius:14,border:"none",background:"linear-gradient(135deg,#0EA5E9,#0284C7)",color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer",boxShadow:"0 4px 16px rgba(14,165,233,0.3)"}},"✓ Enregistrer l'injection")));
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
+</script>
+</body>
+</html>
