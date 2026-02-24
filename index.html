@@ -38,7 +38,15 @@ const VER="1.0.0";
 const GROUPS=[
   {id:"hls",name:"Hors Sol",icon:"🫐",color:"#3B82F6",station:"SF1",sections:["AG1","AG2","AG3a","AG3b"]},
   {id:"sol",name:"Sol",icon:"🫐",color:"#DC2626",station:"SF2",sections:["AG4","AG5","AG6"]},
-  {id:"fraise",name:"Fraise",icon:"🍓",color:"#16A34A",station:"SF2",sections:["S1","S2","S3"]}
+  {id:"fraise",name:"Fraise",icon:"🍓",color:"#16A34A",station:"F1/F2/F3",sections:["S1","S2","S3"]}
+];
+
+const STATIONS=[
+  {id:"SF1",label:"SF1 — Hors Sol",group:"hls",sections:["AG1","AG2","AG3a","AG3b"]},
+  {id:"SF2",label:"SF2 — Sol",group:"sol",sections:["AG4","AG5","AG6"]},
+  {id:"F1",label:"F1 — Fraise S1",group:"fraise",sections:["S1"]},
+  {id:"F2",label:"F2 — Fraise S2",group:"fraise",sections:["S2"]},
+  {id:"F3",label:"F3 — Fraise S3",group:"fraise",sections:["S3"]}
 ];
 
 const SECTIONS={
@@ -309,7 +317,8 @@ function InjectionForm({bg,cbg,ctx,stx,bd,dark,onSubmit,onClose}){
   const[date,setDate]=useState(new Date().toISOString().split("T")[0]);
   const[time,setTime]=useState(new Date().toTimeString().slice(0,5));
 
-  const availSections=station==="SF1"?GROUPS[0].sections:GROUPS[1].sections.concat(GROUPS[2].sections);
+  const curStation=STATIONS.find(s=>s.id===station);
+  const availSections=curStation?curStation.sections:[];
 
   const toggleSec=sk=>{setSections(p=>p.includes(sk)?p.filter(s=>s!==sk):[...p,sk])};
   const selectAll=()=>{setSections(sections.length===availSections.length?[]:availSections.slice())};
@@ -335,8 +344,8 @@ function InjectionForm({bg,cbg,ctx,stx,bd,dark,onSubmit,onClose}){
 
       // Station
       React.createElement("label",{style:{...lbl,marginTop:6}},"🏭 Station"),
-      React.createElement("div",{style:{display:"flex",gap:8,marginBottom:10}},
-        ["SF1","SF2"].map(s=>React.createElement("button",{key:s,onClick:()=>{setStation(s);setSections([])},style:{flex:1,padding:10,borderRadius:12,border:"2px solid "+(station===s?"#0EA5E9":bd),background:station===s?(dark?"#0C4A6E":"#E0F2FE"):"transparent",color:station===s?"#0EA5E9":stx,fontWeight:station===s?700:500,fontSize:12,cursor:"pointer"}},s+(s==="SF1"?" (HLS)":" (Sol+Fraise)")))),
+      React.createElement("div",{style:{display:"flex",flexWrap:"wrap",gap:6,marginBottom:10}},
+        STATIONS.map(s=>React.createElement("button",{key:s.id,onClick:()=>{setStation(s.id);setSections([])},style:{padding:"8px 12px",borderRadius:12,border:"2px solid "+(station===s.id?"#0EA5E9":bd),background:station===s.id?(dark?"#0C4A6E":"#E0F2FE"):"transparent",color:station===s.id?"#0EA5E9":stx,fontWeight:station===s.id?700:500,fontSize:11,cursor:"pointer"}},s.label))),
 
       // Sections
       React.createElement("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center"}},
