@@ -88,6 +88,21 @@ function exportExcel(injections){
   const a=document.createElement("a");a.href=URL.createObjectURL(blob);
   a.download="irrigation-agro-berry-"+new Date().toISOString().split("T")[0]+".csv";a.click();
 }
+async function ghSync(c,data){
+  const ct=btoa(unescape(encodeURIComponent(JSON.stringify(data,null,2))));
+  const u="https://api.github.com/repos/"+c.owner+"/"+c.repo+"/contents/data/irrigation-data.json";
+  let sha=null;
+  try{const e=await fetch(u,{headers:{Authorization:"token "+c.token}});if(e.ok)sha=(await e.json()).sha}catch(e){}
+  const b={message:"Sync irrigation - "+new Date().toLocaleString("fr-FR"),content:ct};
+  if(sha)b.sha=sha;
+  return fetch(u,{method:"PUT",headers:{Authorization:"token "+c.token,"Content-Type":"application/json"},body:JSON.stringify(b)});
+}
+async function ghRestore(c){
+  const u="https://api.github.com/repos/"+c.owner+"/"+c.repo+"/contents/data/irrigation-data.json";
+  const r=await fetch(u,{headers:{Authorization:"token "+c.token}});
+  if(r.ok){const f=await r.json();return JSON.parse(decodeURIComponent(escape(atob(f.content))))}
+  return null;
+}
 
 function App(){
   const[injections,setInj]=useState(()=>ld("injections",[]));
@@ -95,13 +110,29 @@ function App(){
   const[page,setPage]=useState("dash");
   const[toast,setToast]=useState(null);
   const[showForm,setShowForm]=useState(null);
+  const[ghCfg,setGhCfg]=useState(()=>ld("ghCfg",{owner:"ahmedechennoufi",repo:"irrigation-",token:""}));
+  const[syncSt,setSyncSt]=useState("");
 
   useEffect(()=>{sv("injections",injections)},[injections]);
   useEffect(()=>{sv("dark",dark);dark?document.body.classList.add("dark"):document.body.classList.remove("dark")},[dark]);
+  useEffect(()=>{sv("ghCfg",ghCfg)},[ghCfg]);
 
   const t=(m,tp)=>{setToast({m,tp});setTimeout(()=>setToast(null),2500)};
   const addInj=r=>{setInj(p=>[{...r,id:gid(),at:new Date().toISOString()},...p]);t("Injection enregistrée ✓");setShowForm(null)};
   const delInj=id=>{setInj(p=>p.filter(r=>r.id!==id));t("Supprimé")};
+
+  const sync=async()=>{
+    if(!ghCfg.token){t("Token GitHub manquant","err");return}
+    setSyncSt("sync");
+    try{await ghSync(ghCfg,{injections,exportedAt:new Date().toISOString()});t("Sauvegardé sur GitHub ✓");setSyncSt("ok")}
+    catch(e){t("Erreur sync: "+e.message,"err");setSyncSt("err")}
+  };
+  const restore=async()=>{
+    if(!ghCfg.token){t("Token GitHub manquant","err");return}
+    setSyncSt("restore");
+    try{const d=await ghRestore(ghCfg);if(d&&d.injections){setInj(d.injections);t("Restauré depuis GitHub ✓ ("+d.injections.length+" injections)");setSyncSt("ok")}else{t("Aucune donnée trouvée","err");setSyncSt("err")}}
+    catch(e){t("Erreur restore: "+e.message,"err");setSyncSt("err")}
+  };
 
   const bg=dark?"#0C1222":"#F0F9FF",cbg=dark?"#1E293B":"#fff",ctx=dark?"#E2E8F0":"#1E293B",stx=dark?"#94A3B8":"#64748B",bd=dark?"#334155":"#E2E8F0";
   const th={bg,cbg,ctx,stx,bd,dark};
@@ -124,11 +155,12 @@ function App(){
       page==="hls"&&React.createElement(GroupView,{...th,group:GROUPS[0],injections,delInj,showForm,setShowForm,addInj}),
       page==="sol"&&React.createElement(GroupView,{...th,group:GROUPS[1],injections,delInj,showForm,setShowForm,addInj}),
       page==="fraise"&&React.createElement(GroupView,{...th,group:GROUPS[2],injections,delInj,showForm,setShowForm,addInj}),
-      page==="history"&&React.createElement(History,{...th,injections,delInj})),
+      page==="history"&&React.createElement(History,{...th,injections,delInj}),
+      page==="settings"&&React.createElement(Settings,{...th,ghCfg,setGhCfg,sync,restore,syncSt,injections,setInj,t})),
 
     // BOTTOM NAV
     React.createElement("nav",{className:"glass",style:{position:"fixed",bottom:0,left:0,right:0,display:"flex",justifyContent:"space-around",padding:"6px 0 8px",borderTop:"1px solid "+(dark?"#1E293B":"#E2E8F0"),zIndex:100}},
-      [{k:"dash",l:"Dashboard",i:"📊",ac:"#0EA5E9"},{k:"hls",l:"Hors Sol",i:"🫐",ac:"#3B82F6"},{k:"sol",l:"Sol",i:"🌱",ac:"#DC2626"},{k:"fraise",l:"Fraise",i:"🍓",ac:"#16A34A"},{k:"history",l:"Historique",i:"📜",ac:"#8B5CF6"}].map(tab=>
+      [{k:"dash",l:"Dashboard",i:"📊",ac:"#0EA5E9"},{k:"hls",l:"Hors Sol",i:"🫐",ac:"#3B82F6"},{k:"sol",l:"Sol",i:"🌱",ac:"#DC2626"},{k:"fraise",l:"Fraise",i:"🍓",ac:"#16A34A"},{k:"history",l:"Historique",i:"📜",ac:"#8B5CF6"},{k:"settings",l:"Config",i:"⚙️",ac:"#64748B"}].map(tab=>
         React.createElement("button",{key:tab.k,onClick:()=>setPage(tab.k),style:{background:"transparent",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"4px 6px",cursor:"pointer",borderRadius:10,color:page===tab.k?tab.ac:stx,fontWeight:page===tab.k?700:500,position:"relative"}},
           page===tab.k&&React.createElement("div",{style:{position:"absolute",top:-6,width:24,height:3,borderRadius:2,background:tab.ac}}),
           React.createElement("span",{style:{fontSize:17}},tab.i),React.createElement("span",{style:{fontSize:8}},tab.l)))),
@@ -381,6 +413,50 @@ function InjectionForm({bg,cbg,ctx,stx,bd,dark,groupFilter,onSubmit,onClose}){
 
       // Submit
       React.createElement("button",{onClick:submit,style:{width:"100%",padding:14,borderRadius:14,border:"none",background:"linear-gradient(135deg,#0EA5E9,#0284C7)",color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer",boxShadow:"0 4px 16px rgba(14,165,233,0.3)"}},"✓ Enregistrer l'injection")));
+}
+
+// ===== SETTINGS =====
+function Settings({bg,cbg,ctx,stx,bd,dark,ghCfg,setGhCfg,sync,restore,syncSt,injections,setInj,t}){
+  const is={width:"100%",padding:"11px 12px",borderRadius:12,border:"2px solid "+bd,fontSize:13,outline:"none",background:cbg,color:ctx};
+  const lbl={fontSize:11,fontWeight:700,color:stx,marginBottom:4,display:"block"};
+  return React.createElement("div",{style:{animation:"fadeIn 0.3s"}},
+    React.createElement("h2",{style:{fontSize:16,fontWeight:800,marginBottom:14}},"⚙️ Configuration"),
+
+    // GitHub Sync
+    React.createElement("div",{style:{background:cbg,borderRadius:16,padding:16,border:"1px solid "+bd,marginBottom:14}},
+      React.createElement("h3",{style:{fontSize:14,fontWeight:700,marginBottom:12,display:"flex",alignItems:"center",gap:6}},"🔄 Sauvegarde GitHub"),
+      React.createElement("label",{style:lbl},"Owner"),
+      React.createElement("input",{value:ghCfg.owner,onChange:e=>setGhCfg({...ghCfg,owner:e.target.value}),style:{...is,marginBottom:8}}),
+      React.createElement("label",{style:lbl},"Repo"),
+      React.createElement("input",{value:ghCfg.repo,onChange:e=>setGhCfg({...ghCfg,repo:e.target.value}),style:{...is,marginBottom:8}}),
+      React.createElement("label",{style:lbl},"Token GitHub"),
+      React.createElement("input",{type:"password",value:ghCfg.token,onChange:e=>setGhCfg({...ghCfg,token:e.target.value}),placeholder:"ghp_...",style:{...is,marginBottom:12}}),
+      React.createElement("div",{style:{display:"flex",gap:8}},
+        React.createElement("button",{onClick:sync,disabled:syncSt==="sync",style:{flex:1,padding:12,borderRadius:12,border:"none",background:syncSt==="sync"?"#94A3B8":"linear-gradient(135deg,#0EA5E9,#0284C7)",color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer"}},syncSt==="sync"?"⏳ Sauvegarde...":"☁️ Sauvegarder"),
+        React.createElement("button",{onClick:restore,disabled:syncSt==="restore",style:{flex:1,padding:12,borderRadius:12,border:"2px solid #0EA5E9",background:"transparent",color:"#0EA5E9",fontWeight:700,fontSize:12,cursor:"pointer"}},syncSt==="restore"?"⏳ Restauration...":"📥 Restaurer"))),
+
+    // Stats
+    React.createElement("div",{style:{background:cbg,borderRadius:16,padding:16,border:"1px solid "+bd,marginBottom:14}},
+      React.createElement("h3",{style:{fontSize:14,fontWeight:700,marginBottom:10}},"📊 Statistiques"),
+      React.createElement("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}},
+        [{l:"Injections",v:injections.length,c:"#0EA5E9"},{l:"Aujourd'hui",v:injections.filter(r=>isToday(r.at)).length,c:"#10B981"},{l:"Cette semaine",v:injections.filter(r=>isThisWeek(r.at)).length,c:"#8B5CF6"},{l:"Stockage",v:Math.round(JSON.stringify(injections).length/1024)+" KB",c:"#F59E0B"}].map((s,i)=>
+          React.createElement("div",{key:i,style:{padding:10,borderRadius:10,background:dark?"#1E293B":"#F8FAFC",textAlign:"center"}},
+            React.createElement("div",{style:{fontSize:18,fontWeight:800,color:s.c}},s.v),
+            React.createElement("div",{style:{fontSize:9,color:stx,fontWeight:600}},s.l))))),
+
+    // Export
+    React.createElement("div",{style:{background:cbg,borderRadius:16,padding:16,border:"1px solid "+bd,marginBottom:14}},
+      React.createElement("h3",{style:{fontSize:14,fontWeight:700,marginBottom:10}},"📥 Export"),
+      React.createElement("button",{onClick:()=>exportExcel(injections),style:{width:"100%",padding:12,borderRadius:12,border:"none",background:"linear-gradient(135deg,#10B981,#059669)",color:"#fff",fontWeight:700,fontSize:12,cursor:"pointer",marginBottom:8}},"📥 Exporter en Excel (CSV)"),
+      React.createElement("button",{onClick:()=>{const d=JSON.stringify({injections,exportedAt:new Date().toISOString()},null,2);const b=new Blob([d],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="irrigation-backup-"+new Date().toISOString().split("T")[0]+".json";a.click()},style:{width:"100%",padding:12,borderRadius:12,border:"2px solid "+bd,background:"transparent",color:ctx,fontWeight:700,fontSize:12,cursor:"pointer"}},"💾 Exporter JSON (backup)")),
+
+    // Danger zone
+    React.createElement("div",{style:{background:dark?"#2A1015":"#FEF2F2",borderRadius:16,padding:16,border:"1px solid "+(dark?"#5C2020":"#FECACA")}},
+      React.createElement("h3",{style:{fontSize:14,fontWeight:700,color:"#DC2626",marginBottom:10}},"⚠️ Zone danger"),
+      React.createElement("button",{onClick:()=>{if(confirm("SUPPRIMER TOUTES LES DONNÉES ?")){setInj([]);t("Données supprimées")}},style:{width:"100%",padding:12,borderRadius:12,border:"1px solid #DC2626",background:"transparent",color:"#DC2626",fontSize:12,fontWeight:600,cursor:"pointer"}},"🗑️ Tout supprimer")),
+
+    // Version
+    React.createElement("div",{style:{textAlign:"center",padding:16,color:stx,fontSize:10}},"Agro Berry Irrigation v"+VER+" • Ferme Zaouia"));
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
