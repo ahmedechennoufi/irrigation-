@@ -35,7 +35,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
 <script type="text/babel">
-const{useState,useEffect,useMemo}=React;
+const{useState,useEffect,useMemo,useRef}=React;
 const VER="1.0.0";
 
 const GROUPS=[
@@ -113,10 +113,44 @@ function App(){
   const[showForm,setShowForm]=useState(null);
   const[ghCfg,setGhCfg]=useState(()=>ld("ghCfg",{owner:"ahmedechennoufi",repo:"irrigation-",token:""}));
   const[syncSt,setSyncSt]=useState("");
+  const[loaded,setLoaded]=useState(false);
+  const syncTimer=useRef(null);
+  const skipAutoSync=useRef(false);
 
+  // Auto-restore from GitHub on first load
+  useEffect(()=>{
+    if(!ghCfg.token){setLoaded(true);return}
+    setSyncSt("⏳");
+    ghRestore(ghCfg).then(d=>{
+      if(d&&d.injections){
+        skipAutoSync.current=true;
+        setInj(d.injections);
+        sv("injections",d.injections);
+        setSyncSt("✅");
+        setTimeout(()=>{setSyncSt("");skipAutoSync.current=false},1500);
+      }else{setSyncSt("")}
+      setLoaded(true);
+    }).catch(()=>{setSyncSt("⚠️");setLoaded(true);setTimeout(()=>setSyncSt(""),3000)});
+  },[]);
+
+  // Save to localStorage always
   useEffect(()=>{sv("injections",injections)},[injections]);
   useEffect(()=>{sv("dark",dark);dark?document.body.classList.add("dark"):document.body.classList.remove("dark")},[dark]);
   useEffect(()=>{sv("ghCfg",ghCfg)},[ghCfg]);
+
+  // Auto-sync to GitHub (debounced 2s) on every data change
+  useEffect(()=>{
+    if(!loaded||skipAutoSync.current||!ghCfg.token)return;
+    if(syncTimer.current)clearTimeout(syncTimer.current);
+    syncTimer.current=setTimeout(()=>{
+      setSyncSt("⏳");
+      ghSync(ghCfg,{injections,exportedAt:new Date().toISOString()}).then(r=>{
+        if(r.ok){setSyncSt("✅");setTimeout(()=>setSyncSt(""),2000)}
+        else{setSyncSt("⚠️");setTimeout(()=>setSyncSt(""),3000)}
+      }).catch(()=>{setSyncSt("⚠️");setTimeout(()=>setSyncSt(""),3000)});
+    },1500);
+    return()=>{if(syncTimer.current)clearTimeout(syncTimer.current)};
+  },[injections,loaded]);
 
   const t=(m,tp)=>{setToast({m,tp});setTimeout(()=>setToast(null),2500)};
   const addInj=r=>{setInj(p=>[{...r,id:gid(),at:new Date().toISOString()},...p]);t("Injection enregistrée ✓");setShowForm(null)};
@@ -124,19 +158,24 @@ function App(){
 
   const sync=async()=>{
     if(!ghCfg.token){t("Token GitHub manquant","err");return}
-    setSyncSt("sync");
-    try{await ghSync(ghCfg,{injections,exportedAt:new Date().toISOString()});t("Sauvegardé sur GitHub ✓");setSyncSt("ok")}
-    catch(e){t("Erreur sync: "+e.message,"err");setSyncSt("err")}
+    setSyncSt("⏳");
+    try{await ghSync(ghCfg,{injections,exportedAt:new Date().toISOString()});t("Sauvegardé sur GitHub ✓");setSyncSt("✅");setTimeout(()=>setSyncSt(""),2000)}
+    catch(e){t("Erreur sync: "+e.message,"err");setSyncSt("⚠️");setTimeout(()=>setSyncSt(""),3000)}
   };
   const restore=async()=>{
     if(!ghCfg.token){t("Token GitHub manquant","err");return}
-    setSyncSt("restore");
-    try{const d=await ghRestore(ghCfg);if(d&&d.injections){setInj(d.injections);t("Restauré depuis GitHub ✓ ("+d.injections.length+" injections)");setSyncSt("ok")}else{t("Aucune donnée trouvée","err");setSyncSt("err")}}
-    catch(e){t("Erreur restore: "+e.message,"err");setSyncSt("err")}
+    setSyncSt("⏳");
+    try{const d=await ghRestore(ghCfg);if(d&&d.injections){skipAutoSync.current=true;setInj(d.injections);t("Restauré depuis GitHub ✓ ("+d.injections.length+" injections)");setSyncSt("✅");setTimeout(()=>{setSyncSt("");skipAutoSync.current=false},2000)}else{t("Aucune donnée trouvée","err");setSyncSt("⚠️")}}
+    catch(e){t("Erreur restore: "+e.message,"err");setSyncSt("⚠️");setTimeout(()=>setSyncSt(""),3000)}
   };
 
   const bg=dark?"#0C1222":"#F0F9FF",cbg=dark?"#1E293B":"#fff",ctx=dark?"#E2E8F0":"#1E293B",stx=dark?"#94A3B8":"#64748B",bd=dark?"#334155":"#E2E8F0";
   const th={bg,cbg,ctx,stx,bd,dark};
+
+  if(!loaded)return React.createElement("div",{style:{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"linear-gradient(135deg,#0C4A6E,#0369A1)"}},
+    React.createElement("div",{style:{fontSize:48,marginBottom:16}},"💧"),
+    React.createElement("div",{style:{color:"#fff",fontSize:18,fontWeight:700}},"Chargement..."),
+    React.createElement("div",{style:{color:"#7DD3FC",fontSize:13,marginTop:6}},"Synchronisation GitHub"));
 
   return React.createElement("div",{style:{minHeight:"100vh",background:bg,color:ctx,paddingBottom:82}},
     toast&&React.createElement("div",{style:{position:"fixed",top:16,left:"50%",transform:"translateX(-50%)",zIndex:9999,padding:"12px 24px",borderRadius:14,background:toast.tp==="err"?"#EF4444":"#0EA5E9",color:"#fff",fontWeight:600,fontSize:14,boxShadow:"0 12px 40px rgba(0,0,0,0.3)",animation:"slideDown 0.3s"}},toast.m),
@@ -148,7 +187,10 @@ function App(){
         React.createElement("div",null,
           React.createElement("h1",{style:{color:"#fff",fontSize:17,fontWeight:800,margin:0,letterSpacing:"-0.3px"}},"AGRO BERRY"),
           React.createElement("p",{style:{color:"#7DD3FC",fontSize:10,margin:0}},"Suivi Irrigation • Ferme Zaouia"))),
-      React.createElement("button",{onClick:()=>setDark(!dark),style:{background:"rgba(255,255,255,0.12)",border:"none",color:"#fff",padding:10,borderRadius:12,fontSize:18,cursor:"pointer",width:42,height:42,display:"flex",alignItems:"center",justifyContent:"center",minHeight:"auto"}},dark?"☀️":"🌙")),
+      React.createElement("div",{style:{display:"flex",alignItems:"center",gap:8}},
+        syncSt&&React.createElement("span",{style:{fontSize:16,animation:syncSt==="⏳"?"pulse 1.5s infinite":"none"}},syncSt),
+        ghCfg.token&&!syncSt&&React.createElement("span",{style:{width:8,height:8,borderRadius:"50%",background:"#10B981",display:"inline-block"}}),
+        React.createElement("button",{onClick:()=>setDark(!dark),style:{background:"rgba(255,255,255,0.12)",border:"none",color:"#fff",padding:10,borderRadius:12,fontSize:18,cursor:"pointer",width:42,height:42,display:"flex",alignItems:"center",justifyContent:"center",minHeight:"auto"}},dark?"☀️":"🌙"))),
 
     // MAIN
     React.createElement("main",{style:{padding:"12px 14px",maxWidth:800,margin:"0 auto"}},
