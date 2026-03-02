@@ -6,9 +6,10 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#0C4A6E">
+  <link rel="apple-touch-icon" href="icon-192x192.png">
   <title>Agro Berry — Suivi Irrigation</title>
   <link rel="manifest" href="manifest.json">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💧</text></svg>">
+  <link rel="icon" href="icon-192x192.png">
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0}
@@ -27,6 +28,9 @@
     table{width:100%;border-collapse:collapse}
     th{text-align:left}
     @supports(padding-bottom:env(safe-area-inset-bottom)){.safe-b{padding-bottom:calc(10px + env(safe-area-inset-bottom))!important}}
+    .confirm-overlay{position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;animation:fadeIn 0.2s}
+    .confirm-box{background:#fff;border-radius:20px;padding:24px;max-width:320px;width:90%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.3)}
+    .dark .confirm-box{background:#1E293B}
   </style>
 </head>
 <body>
@@ -36,7 +40,12 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
 <script type="text/babel">
 const{useState,useEffect,useMemo,useRef}=React;
-const VER="1.0.0";
+const VER="2.0.0";
+
+// ===== Register Service Worker for PWA =====
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('./sw.js').catch(e=>console.log('SW err:',e));
+}
 
 const GROUPS=[
   {id:"hls",name:"Hors Sol",icon:"🫐",color:"#3B82F6",station:"SF1",sections:["AG1","AG2","AG3a","AG3b"]},
@@ -63,7 +72,27 @@ const SECTIONS={
   S3:{name:"S3",fullName:"Fraise",area:"3.80 ha",date:"Oct 2025",group:"fraise",color:"#0D9488",parcelles:["V19","V20"]}
 };
 
-const PRODUCTS=["Acide Nitrique","Acide Phosphorique","Sulfate de Potasse","Nitrate de Calcium","Nitrate de Potasse","Sulfate de Magnésium","MAP","MKP","Fer EDDHA","Acide Citrique","Oligo-éléments","Correcteur pH","Autre"];
+// ===== PRODUCTS from Agro Berry (Engrais + Foliaire + Acides) =====
+const PRODUCT_CATEGORIES={
+  "Engrais Poudre":[
+    "Sulfate de Potasse","Acide Phosphorique","Novatec 21","MAP","MKP",
+    "Urée","Sulfate de Magnésium","Nitrate de Calcium","Nitrate de Potasse",
+    "Nitrate de Magnésium","Ammonitrate","Sodibor","Sulfate de Zinc",
+    "Nuter-C","Fer EDDHA","Oligo-éléments"
+  ],
+  "Engrais Foliaire":[
+    "Greenstim","Foliastim Pure","Folicist","Kelpak","Raizante",
+    "Top Racine","Isabion","Bioforge","Bioenergy","Biobac",
+    "Vital Cu","Feroxim","Micromix","Vitacrop Marina"
+  ],
+  "Acides":[
+    "Acide Nitrique","Acide Phosphorique","Acide Citrique","Correcteur pH"
+  ]
+};
+
+const ALL_PRODUCTS=[...new Set(Object.values(PRODUCT_CATEGORIES).flat())];
+
+const MONTH_NAMES=["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
 
 const gid=()=>Date.now().toString(36)+Math.random().toString(36).substr(2);
 const fD=d=>new Date(d).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"numeric"});
@@ -72,6 +101,8 @@ const fH=d=>new Date(d).toLocaleString("fr-FR",{hour:"2-digit",minute:"2-digit"}
 const isToday=d=>{const t=new Date(),dd=new Date(d);return t.toDateString()===dd.toDateString()};
 const isThisWeek=d=>{const now=new Date(),dd=new Date(d),diff=(now-dd)/(864e5);return diff>=0&&diff<7};
 const timeAgo=d=>{const m=Math.floor((new Date()-new Date(d))/6e4);if(m<1)return"à l'instant";if(m<60)return"il y a "+m+"min";const h=Math.floor(m/60);if(h<24)return"il y a "+h+"h";return"il y a "+Math.floor(h/24)+"j"};
+const getMonthKey=d=>{const dd=new Date(d);return dd.getFullYear()+"-"+String(dd.getMonth()+1).padStart(2,"0")};
+const getMonthLabel=k=>{const[y,m]=k.split("-");return MONTH_NAMES[parseInt(m)-1]+" "+y};
 
 function ld(k,f){try{const d=localStorage.getItem("irr_"+k);return d?JSON.parse(d):f}catch(e){return f}}
 function sv(k,d){try{localStorage.setItem("irr_"+k,JSON.stringify(d))}catch(e){console.error("Storage:",e)}}
@@ -105,8 +136,20 @@ async function ghRestore(c){
   return null;
 }
 
+// ===== CONFIRM DIALOG (changement #2) =====
+function ConfirmDialog({msg,onOk,onCancel,dark}){
+  return React.createElement("div",{className:"confirm-overlay",onClick:onCancel},
+    React.createElement("div",{className:"confirm-box",onClick:e=>e.stopPropagation(),style:{background:dark?"#1E293B":"#fff"}},
+      React.createElement("div",{style:{fontSize:40,marginBottom:12}},"⚠️"),
+      React.createElement("p",{style:{fontSize:15,fontWeight:600,marginBottom:20,color:dark?"#E2E8F0":"#1E293B"}},msg),
+      React.createElement("div",{style:{display:"flex",gap:10}},
+        React.createElement("button",{onClick:onCancel,style:{flex:1,padding:14,borderRadius:14,border:"2px solid "+(dark?"#334155":"#E2E8F0"),background:"transparent",color:dark?"#94A3B8":"#64748B",fontWeight:700,fontSize:14,cursor:"pointer"}},"Annuler"),
+        React.createElement("button",{onClick:onOk,style:{flex:1,padding:14,borderRadius:14,border:"none",background:"#EF4444",color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer"}},"Supprimer"))));
+}
+
 function App(){
   const[injections,setInj]=useState(()=>ld("injections",[]));
+  const[customProducts,setCustomProducts]=useState(()=>ld("customProducts",[]));
   const[dark,setDark]=useState(()=>ld("dark",false));
   const[page,setPage]=useState("dash");
   const[toast,setToast]=useState(null);
@@ -114,10 +157,10 @@ function App(){
   const[ghCfg,setGhCfg]=useState(()=>ld("ghCfg",{owner:"ahmedechennoufi",repo:"irrigation-",token:""}));
   const[syncSt,setSyncSt]=useState("");
   const[loaded,setLoaded]=useState(false);
+  const[confirmDel,setConfirmDel]=useState(null);
   const syncTimer=useRef(null);
   const skipAutoSync=useRef(false);
 
-  // Auto-restore from GitHub on first load
   useEffect(()=>{
     if(!ghCfg.token){setLoaded(true);return}
     setSyncSt("⏳");
@@ -126,6 +169,7 @@ function App(){
         skipAutoSync.current=true;
         setInj(d.injections);
         sv("injections",d.injections);
+        if(d.customProducts){setCustomProducts(d.customProducts);sv("customProducts",d.customProducts)}
         setSyncSt("✅");
         setTimeout(()=>{setSyncSt("");skipAutoSync.current=false},1500);
       }else{setSyncSt("")}
@@ -133,39 +177,44 @@ function App(){
     }).catch(()=>{setSyncSt("⚠️");setLoaded(true);setTimeout(()=>setSyncSt(""),3000)});
   },[]);
 
-  // Save to localStorage always
   useEffect(()=>{sv("injections",injections)},[injections]);
+  useEffect(()=>{sv("customProducts",customProducts)},[customProducts]);
   useEffect(()=>{sv("dark",dark);dark?document.body.classList.add("dark"):document.body.classList.remove("dark")},[dark]);
   useEffect(()=>{sv("ghCfg",ghCfg)},[ghCfg]);
 
-  // Auto-sync to GitHub (debounced 2s) on every data change
   useEffect(()=>{
     if(!loaded||skipAutoSync.current||!ghCfg.token)return;
     if(syncTimer.current)clearTimeout(syncTimer.current);
     syncTimer.current=setTimeout(()=>{
       setSyncSt("⏳");
-      ghSync(ghCfg,{injections,exportedAt:new Date().toISOString()}).then(r=>{
+      ghSync(ghCfg,{injections,customProducts,exportedAt:new Date().toISOString()}).then(r=>{
         if(r.ok){setSyncSt("✅");setTimeout(()=>setSyncSt(""),2000)}
         else{setSyncSt("⚠️");setTimeout(()=>setSyncSt(""),3000)}
       }).catch(()=>{setSyncSt("⚠️");setTimeout(()=>setSyncSt(""),3000)});
     },1500);
     return()=>{if(syncTimer.current)clearTimeout(syncTimer.current)};
-  },[injections,loaded]);
+  },[injections,customProducts,loaded]);
 
   const t=(m,tp)=>{setToast({m,tp});setTimeout(()=>setToast(null),2500)};
   const addInj=r=>{setInj(p=>[{...r,id:gid(),at:new Date().toISOString()},...p]);t("Injection enregistrée ✓");setShowForm(null)};
-  const delInj=id=>{setInj(p=>p.filter(r=>r.id!==id));t("Supprimé")};
+  
+  // Changement #2: confirmation avant suppression
+  const requestDel=id=>{setConfirmDel(id)};
+  const confirmDelete=()=>{if(confirmDel){setInj(p=>p.filter(r=>r.id!==confirmDel));t("Supprimé");setConfirmDel(null)}};
+  const cancelDelete=()=>{setConfirmDel(null)};
+
+  const addCustomProduct=name=>{if(name&&!customProducts.includes(name)&&!ALL_PRODUCTS.includes(name)){setCustomProducts(p=>[...p,name])}};
 
   const sync=async()=>{
     if(!ghCfg.token){t("Token GitHub manquant","err");return}
     setSyncSt("⏳");
-    try{await ghSync(ghCfg,{injections,exportedAt:new Date().toISOString()});t("Sauvegardé sur GitHub ✓");setSyncSt("✅");setTimeout(()=>setSyncSt(""),2000)}
+    try{await ghSync(ghCfg,{injections,customProducts,exportedAt:new Date().toISOString()});t("Sauvegardé sur GitHub ✓");setSyncSt("✅");setTimeout(()=>setSyncSt(""),2000)}
     catch(e){t("Erreur sync: "+e.message,"err");setSyncSt("⚠️");setTimeout(()=>setSyncSt(""),3000)}
   };
   const restore=async()=>{
     if(!ghCfg.token){t("Token GitHub manquant","err");return}
     setSyncSt("⏳");
-    try{const d=await ghRestore(ghCfg);if(d&&d.injections){skipAutoSync.current=true;setInj(d.injections);t("Restauré depuis GitHub ✓ ("+d.injections.length+" injections)");setSyncSt("✅");setTimeout(()=>{setSyncSt("");skipAutoSync.current=false},2000)}else{t("Aucune donnée trouvée","err");setSyncSt("⚠️")}}
+    try{const d=await ghRestore(ghCfg);if(d&&d.injections){skipAutoSync.current=true;setInj(d.injections);if(d.customProducts)setCustomProducts(d.customProducts);t("Restauré depuis GitHub ✓ ("+d.injections.length+" injections)");setSyncSt("✅");setTimeout(()=>{setSyncSt("");skipAutoSync.current=false},2000)}else{t("Aucune donnée trouvée","err");setSyncSt("⚠️")}}
     catch(e){t("Erreur restore: "+e.message,"err");setSyncSt("⚠️");setTimeout(()=>setSyncSt(""),3000)}
   };
 
@@ -180,10 +229,13 @@ function App(){
   return React.createElement("div",{style:{minHeight:"100vh",background:bg,color:ctx,paddingBottom:82}},
     toast&&React.createElement("div",{style:{position:"fixed",top:16,left:"50%",transform:"translateX(-50%)",zIndex:9999,padding:"12px 24px",borderRadius:14,background:toast.tp==="err"?"#EF4444":"#0EA5E9",color:"#fff",fontWeight:600,fontSize:14,boxShadow:"0 12px 40px rgba(0,0,0,0.3)",animation:"slideDown 0.3s"}},toast.m),
 
+    // Confirm dialog
+    confirmDel&&React.createElement(ConfirmDialog,{msg:"Êtes-vous sûr de vouloir supprimer cette injection ?",onOk:confirmDelete,onCancel:cancelDelete,dark}),
+
     // HEADER
     React.createElement("header",{style:{background:"linear-gradient(135deg,#0C4A6E,#0369A1)",padding:"16px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}},
       React.createElement("div",{style:{display:"flex",alignItems:"center",gap:12}},
-        React.createElement("div",{style:{width:38,height:38,borderRadius:12,background:"linear-gradient(135deg,#0EA5E9,#0284C7)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:19}},"💧"),
+        React.createElement("img",{src:"icon-192x192.png",alt:"AB",style:{width:38,height:38,borderRadius:12},onError:e=>{e.target.style.display="none"}}),
         React.createElement("div",null,
           React.createElement("h1",{style:{color:"#fff",fontSize:17,fontWeight:800,margin:0,letterSpacing:"-0.3px"}},"AGRO BERRY"),
           React.createElement("p",{style:{color:"#7DD3FC",fontSize:10,margin:0}},"Suivi Irrigation • Ferme Zaouia"))),
@@ -194,12 +246,12 @@ function App(){
 
     // MAIN
     React.createElement("main",{style:{padding:"12px 14px",maxWidth:800,margin:"0 auto"}},
-      page==="dash"&&React.createElement(Dashboard,{...th,injections,delInj,showForm,setShowForm,addInj}),
-      page==="hls"&&React.createElement(GroupView,{...th,group:GROUPS[0],injections,delInj,showForm,setShowForm,addInj}),
-      page==="sol"&&React.createElement(GroupView,{...th,group:GROUPS[1],injections,delInj,showForm,setShowForm,addInj}),
-      page==="fraise"&&React.createElement(GroupView,{...th,group:GROUPS[2],injections,delInj,showForm,setShowForm,addInj}),
-      page==="history"&&React.createElement(History,{...th,injections,delInj}),
-      page==="settings"&&React.createElement(Settings,{...th,ghCfg,setGhCfg,sync,restore,syncSt,injections,setInj,t})),
+      page==="dash"&&React.createElement(Dashboard,{...th,injections,delInj:requestDel,showForm,setShowForm,addInj}),
+      page==="hls"&&React.createElement(GroupView,{...th,group:GROUPS[0],injections,delInj:requestDel,showForm,setShowForm,addInj}),
+      page==="sol"&&React.createElement(GroupView,{...th,group:GROUPS[1],injections,delInj:requestDel,showForm,setShowForm,addInj}),
+      page==="fraise"&&React.createElement(GroupView,{...th,group:GROUPS[2],injections,delInj:requestDel,showForm,setShowForm,addInj}),
+      page==="history"&&React.createElement(History,{...th,injections,delInj:requestDel}),
+      page==="settings"&&React.createElement(Settings,{...th,ghCfg,setGhCfg,sync,restore,syncSt,injections,setInj,customProducts,setCustomProducts,t})),
 
     // BOTTOM NAV
     React.createElement("nav",{className:"glass safe-b",style:{position:"fixed",bottom:0,left:0,right:0,display:"flex",justifyContent:"space-around",padding:"8px 0 10px",borderTop:"1px solid "+(dark?"#1E293B":"#E2E8F0"),zIndex:100}},
@@ -208,7 +260,7 @@ function App(){
           page===tab.k&&React.createElement("div",{style:{position:"absolute",top:-8,width:28,height:3,borderRadius:2,background:tab.ac}}),
           React.createElement("span",{style:{fontSize:20}},tab.i),React.createElement("span",{style:{fontSize:9,letterSpacing:"-0.2px"}},tab.l)))),
 
-    showForm&&React.createElement(InjectionForm,{...th,groupFilter:showForm,onSubmit:addInj,onClose:()=>setShowForm(null)}));
+    showForm&&React.createElement(InjectionForm,{...th,groupFilter:showForm,onSubmit:addInj,onClose:()=>setShowForm(null),customProducts,addCustomProduct}));
 }
 
 // ===== DASHBOARD =====
@@ -226,16 +278,13 @@ function Dashboard({bg,cbg,ctx,stx,bd,dark,injections,delInj,showForm,setShowFor
   });
 
   return React.createElement("div",{style:{animation:"fadeIn 0.3s"}},
-    // FAB
     React.createElement("button",{onClick:()=>setShowForm("all"),style:{position:"fixed",bottom:90,right:16,width:60,height:60,borderRadius:18,border:"none",background:"linear-gradient(135deg,#0EA5E9,#0284C7)",color:"#fff",fontSize:28,cursor:"pointer",zIndex:90,boxShadow:"0 6px 24px rgba(14,165,233,0.4)",display:"flex",alignItems:"center",justifyContent:"center",minHeight:"auto"}},"+"),
 
-    // KPIs
     React.createElement("div",{style:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:14}},
       [{i:"💧",v:injections.length,l:"Total",c:"#0EA5E9",b:dark?"#0C1A2E":"#E0F2FE"},{i:"📅",v:today.length,l:"Aujourd'hui",c:"#10B981",b:dark?"#0C1E17":"#D1FAE5"},{i:"📊",v:week.length,l:"Cette semaine",c:"#8B5CF6",b:dark?"#1A1028":"#EDE9FE"}].map((c,i)=>
         React.createElement("div",{key:i,style:{background:c.b,borderRadius:16,padding:"14px 8px",textAlign:"center",border:"1px solid "+bd}},
           React.createElement("div",{style:{fontSize:18}},c.i),React.createElement("div",{style:{fontSize:26,fontWeight:800,color:c.c,marginTop:2}},c.v),React.createElement("div",{style:{fontSize:10,color:c.c,fontWeight:600}},c.l)))),
 
-    // GROUPS OVERVIEW
     React.createElement("h3",{style:{fontSize:14,fontWeight:700,marginBottom:10}},"⚡ Aperçu par groupe"),
     React.createElement("div",{style:{display:"flex",flexDirection:"column",gap:8,marginBottom:14}},
       grpStats.map(g=>React.createElement("div",{key:g.id,style:{background:cbg,borderRadius:16,padding:14,border:"1px solid "+bd,borderLeft:"4px solid "+g.color}},
@@ -251,7 +300,6 @@ function Dashboard({bg,cbg,ctx,stx,bd,dark,injections,delInj,showForm,setShowFor
         g.last&&React.createElement("div",{style:{fontSize:11,color:stx,padding:"8px 10px",background:dark?"#1E293B":"#F8FAFC",borderRadius:10,marginTop:4}},
           "Dernier: ",React.createElement("strong",null,g.last.product)," • "+g.last.dose," — ",React.createElement("span",{style:{color:g.color}},timeAgo(g.last.at)))))),
 
-    // RECENT INJECTIONS
     React.createElement("h3",{style:{fontSize:14,fontWeight:700,marginBottom:10}},today.length>0?"💧 Aujourd'hui ("+today.length+")":"💧 Cette semaine"),
     recent.length===0?
       React.createElement("div",{style:{textAlign:"center",padding:40,background:cbg,borderRadius:16,border:"1px solid "+bd}},
@@ -285,7 +333,7 @@ function InjCard({r,dark,cbg,ctx,stx,bd,onDel}){
     r.notes&&React.createElement("div",{style:{fontSize:12,color:stx,marginTop:8,padding:"8px 10px",background:dark?"#1E293B":"#F8FAFC",borderRadius:10,fontStyle:"italic"}},"📝 "+r.notes));
 }
 
-// ===== GROUP VIEW =====
+// ===== GROUP VIEW (changement #6: affichage par mois) =====
 function GroupView({bg,cbg,ctx,stx,bd,dark,group,injections,delInj,showForm,setShowForm,addInj}){
   const gi=injections.filter(r=>r.sections.some(s=>group.sections.includes(s)));
   const today=gi.filter(r=>isToday(r.at));
@@ -299,10 +347,22 @@ function GroupView({bg,cbg,ctx,stx,bd,dark,group,injections,delInj,showForm,setS
     return{sk,sec,total:si.length,today:st.length,last};
   });
 
+  // Group by month
+  const byMonth=useMemo(()=>{
+    const map={};
+    gi.forEach(r=>{
+      const mk=getMonthKey(r.date);
+      if(!map[mk])map[mk]=[];
+      map[mk].push(r);
+    });
+    return Object.entries(map).sort((a,b)=>b[0].localeCompare(a[0])).map(([k,items])=>({key:k,label:getMonthLabel(k),items:items.sort((a,b)=>new Date(b.date)-new Date(a.date))}));
+  },[gi]);
+
+  const[openMonth,setOpenMonth]=useState(byMonth.length>0?byMonth[0].key:null);
+
   return React.createElement("div",{style:{animation:"fadeIn 0.3s"}},
     React.createElement("button",{onClick:()=>setShowForm(group.id),style:{position:"fixed",bottom:90,right:16,width:60,height:60,borderRadius:18,border:"none",background:"linear-gradient(135deg,"+group.color+","+group.color+"CC)",color:"#fff",fontSize:28,cursor:"pointer",zIndex:90,boxShadow:"0 6px 24px "+group.color+"66",display:"flex",alignItems:"center",justifyContent:"center",minHeight:"auto"}},"+"),
 
-    // Header
     React.createElement("div",{style:{background:cbg,borderRadius:18,padding:18,border:"1px solid "+bd,marginBottom:14,borderLeft:"4px solid "+group.color}},
       React.createElement("div",{style:{display:"flex",alignItems:"center",gap:12,marginBottom:10}},
         React.createElement("span",{style:{fontSize:32}},group.icon),
@@ -315,7 +375,6 @@ function GroupView({bg,cbg,ctx,stx,bd,dark,group,injections,delInj,showForm,setS
             React.createElement("div",{style:{fontSize:22,fontWeight:800,color:c.c}},c.v),
             React.createElement("div",{style:{fontSize:10,color:stx,fontWeight:600}},c.l))))),
 
-    // Sections detail
     React.createElement("h3",{style:{fontSize:15,fontWeight:700,marginBottom:10}},"📍 Détail par section"),
     React.createElement("div",{style:{display:"flex",flexDirection:"column",gap:8,marginBottom:14}},
       secStats.map(s=>React.createElement("div",{key:s.sk,style:{background:cbg,borderRadius:16,padding:"12px 14px",border:"1px solid "+bd,borderLeft:"3px solid "+s.sec.color,display:"flex",justifyContent:"space-between",alignItems:"center"}},
@@ -326,33 +385,62 @@ function GroupView({bg,cbg,ctx,stx,bd,dark,group,injections,delInj,showForm,setS
           React.createElement("span",{style:{padding:"4px 12px",borderRadius:20,fontSize:11,fontWeight:600,background:group.color+"18",color:group.color}},s.total+" 💧"),
           s.last&&React.createElement("span",{style:{fontSize:10,color:stx}},timeAgo(s.last.at)))))),
 
-    // Recent for this group
-    React.createElement("h3",{style:{fontSize:14,fontWeight:700,marginBottom:10}},today.length>0?"💧 Aujourd'hui ("+today.length+")":"💧 Récentes"),
-    (today.length>0?today:week.slice(0,8)).length===0?
+    // Changement #6: Affichage par mois
+    React.createElement("h3",{style:{fontSize:15,fontWeight:700,marginBottom:10}},"📅 Injections par mois"),
+    byMonth.length===0?
       React.createElement("div",{style:{textAlign:"center",padding:30,background:cbg,borderRadius:16,border:"1px solid "+bd}},
         React.createElement("div",{style:{fontSize:36}},"💧"),
         React.createElement("p",{style:{fontWeight:600,color:stx,marginTop:6}},"Aucune injection")):
     React.createElement("div",{style:{display:"flex",flexDirection:"column",gap:8}},
-      (today.length>0?today:week.slice(0,8)).map(r=>React.createElement(InjCard,{key:r.id,r,dark,cbg,ctx,stx,bd,onDel:delInj}))));
+      byMonth.map(mo=>React.createElement("div",{key:mo.key},
+        React.createElement("button",{onClick:()=>setOpenMonth(openMonth===mo.key?null:mo.key),style:{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 16px",borderRadius:openMonth===mo.key?"16px 16px 0 0":"16px",border:"1px solid "+bd,background:openMonth===mo.key?(group.color+"12"):cbg,cursor:"pointer",borderBottom:openMonth===mo.key?"none":"1px solid "+bd}},
+          React.createElement("div",{style:{display:"flex",alignItems:"center",gap:10}},
+            React.createElement("span",{style:{fontSize:18}},openMonth===mo.key?"📂":"📁"),
+            React.createElement("span",{style:{fontWeight:700,fontSize:14,color:group.color}},mo.label)),
+          React.createElement("div",{style:{display:"flex",alignItems:"center",gap:8}},
+            React.createElement("span",{style:{padding:"4px 12px",borderRadius:20,fontSize:11,fontWeight:700,background:group.color+"18",color:group.color}},mo.items.length+" 💧"),
+            React.createElement("span",{style:{fontSize:14,color:stx}},openMonth===mo.key?"▲":"▼"))),
+        openMonth===mo.key&&React.createElement("div",{style:{border:"1px solid "+bd,borderTop:"none",borderRadius:"0 0 16px 16px",padding:10,display:"flex",flexDirection:"column",gap:8,background:dark?"#0F172A":"#F8FAFC"}},
+          mo.items.map(r=>React.createElement(InjCard,{key:r.id,r,dark,cbg,ctx,stx,bd,onDel:delInj})))))));
 }
 
-// ===== HISTORY =====
+// ===== HISTORY (changement #3: multi-select cultures + export) =====
 function History({bg,cbg,ctx,stx,bd,dark,injections,delInj}){
-  const[filter,setFilter]=useState("all");
-  const filtered=filter==="all"?injections:injections.filter(r=>r.sections.some(s=>{const grp=GROUPS.find(g=>g.sections.includes(s));return grp&&grp.id===filter}));
+  const[filters,setFilters]=useState(["all"]);
+  
+  const toggleFilter=k=>{
+    if(k==="all"){setFilters(["all"]);return}
+    setFilters(prev=>{
+      let nf=prev.filter(f=>f!=="all");
+      if(nf.includes(k))nf=nf.filter(f=>f!==k);
+      else nf=[...nf,k];
+      return nf.length===0?["all"]:nf;
+    });
+  };
+  
+  const filtered=filters.includes("all")?injections:injections.filter(r=>r.sections.some(s=>{
+    const grp=GROUPS.find(g=>g.sections.includes(s));
+    return grp&&filters.includes(grp.id);
+  }));
   const sorted=filtered.slice().sort((a,b)=>new Date(b.date)-new Date(a.date));
+
+  const filterLabel=filters.includes("all")?"Tous":filters.map(f=>{const g=GROUPS.find(gr=>gr.id===f);return g?g.name:f}).join(" + ");
 
   return React.createElement("div",{style:{animation:"fadeIn 0.3s"}},
     React.createElement("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}},
       React.createElement("h2",{style:{fontSize:18,fontWeight:800}},"📜 Historique ("+filtered.length+")"),
-      React.createElement("button",{onClick:()=>exportExcel(filtered),style:{padding:"10px 18px",borderRadius:14,border:"none",background:"linear-gradient(135deg,#10B981,#059669)",color:"#fff",fontWeight:600,fontSize:13,cursor:"pointer"}},"📥 Export")),
+      React.createElement("button",{onClick:()=>exportExcel(filtered),style:{padding:"10px 18px",borderRadius:14,border:"none",background:"linear-gradient(135deg,#10B981,#059669)",color:"#fff",fontWeight:600,fontSize:13,cursor:"pointer"}},"📥 Export "+filterLabel)),
 
-    // Filters
+    // Changement #3: Multi-select filters
     React.createElement("div",{style:{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}},
-      [{k:"all",l:"Tous"},{k:"hls",l:"🫐 Hors Sol"},{k:"sol",l:"🌱 Sol"},{k:"fraise",l:"🍓 Fraise"}].map(f=>
-        React.createElement("button",{key:f.k,onClick:()=>setFilter(f.k),style:{padding:"10px 16px",borderRadius:20,border:"1px solid "+(filter===f.k?"#0EA5E9":bd),background:filter===f.k?(dark?"#0C4A6E":"#E0F2FE"):"transparent",color:filter===f.k?"#0EA5E9":stx,fontWeight:filter===f.k?700:500,fontSize:13,cursor:"pointer",minHeight:"auto"}},f.l))),
+      [{k:"all",l:"Tous"},{k:"hls",l:"🫐 Hors Sol"},{k:"sol",l:"🌱 Sol"},{k:"fraise",l:"🍓 Fraise"}].map(f=>{
+        const active=filters.includes(f.k)||(f.k==="all"&&filters.includes("all"));
+        return React.createElement("button",{key:f.k,onClick:()=>toggleFilter(f.k),style:{padding:"10px 16px",borderRadius:20,border:"2px solid "+(active?"#0EA5E9":bd),background:active?(dark?"#0C4A6E":"#E0F2FE"):"transparent",color:active?"#0EA5E9":stx,fontWeight:active?700:500,fontSize:13,cursor:"pointer",minHeight:"auto"}},
+          active&&f.k!=="all"?"✓ ":"",f.l)})),
+    
+    !filters.includes("all")&&filters.length>1&&React.createElement("div",{style:{marginBottom:12,padding:"8px 14px",borderRadius:12,background:dark?"#0C4A6E":"#E0F2FE",fontSize:12,fontWeight:600,color:"#0EA5E9"}},
+      "📊 Export combiné : "+filterLabel+" ("+filtered.length+" injections)"),
 
-    // Cards instead of table for mobile
     sorted.length===0?
       React.createElement("div",{style:{textAlign:"center",padding:40,background:cbg,borderRadius:18,border:"1px solid "+bd}},
         React.createElement("div",{style:{fontSize:40}},"📭"),
@@ -378,12 +466,13 @@ function History({bg,cbg,ctx,stx,bd,dark,injections,delInj}){
           r.notes&&React.createElement("div",{style:{fontSize:11,color:stx,marginTop:6,fontStyle:"italic"}},"📝 "+r.notes))})));
 }
 
-// ===== INJECTION FORM =====
-function InjectionForm({bg,cbg,ctx,stx,bd,dark,groupFilter,onSubmit,onClose}){
+// ===== INJECTION FORM (changements #4, #5: produits Agro Berry + option Autre) =====
+function InjectionForm({bg,cbg,ctx,stx,bd,dark,groupFilter,onSubmit,onClose,customProducts,addCustomProduct}){
   const filteredStations=groupFilter==="all"?STATIONS:STATIONS.filter(s=>s.group===groupFilter);
   const[station,setStation]=useState(filteredStations[0]?filteredStations[0].id:"SF1");
   const[sections,setSections]=useState([]);
   const[product,setProduct]=useState("");
+  const[customProd,setCustomProd]=useState("");
   const[dose,setDose]=useState("");
   const[ec,setEc]=useState("");
   const[ph,setPh]=useState("");
@@ -400,8 +489,10 @@ function InjectionForm({bg,cbg,ctx,stx,bd,dark,groupFilter,onSubmit,onClose}){
   const selectAll=()=>{setSections(sections.length===availSections.length?[]:availSections.slice())};
 
   const submit=()=>{
-    if(!product||!dose||sections.length===0){alert("Remplis Produit, Dose et au moins 1 section");return}
-    onSubmit({date,time,station,sections:sections.slice(),product,dose,ec,ph,duration,volume,notes});
+    const finalProduct=product==="__autre__"?customProd.trim():product;
+    if(!finalProduct||!dose||sections.length===0){alert("Remplis Produit, Dose et au moins 1 section");return}
+    if(product==="__autre__"&&customProd.trim()){addCustomProduct(customProd.trim())}
+    onSubmit({date,time,station,sections:sections.slice(),product:finalProduct,dose,ec,ph,duration,volume,notes});
   };
 
   const is={width:"100%",padding:"13px 14px",borderRadius:14,border:"2px solid "+bd,fontSize:15,outline:"none",background:cbg,color:ctx};
@@ -430,11 +521,19 @@ function InjectionForm({bg,cbg,ctx,stx,bd,dark,groupFilter,onSubmit,onClose}){
       React.createElement("div",{style:{display:"flex",flexWrap:"wrap",gap:8,marginBottom:12}},
         availSections.map(sk=>{const sec=SECTIONS[sk];return React.createElement("button",{key:sk,onClick:()=>toggleSec(sk),style:{padding:"10px 14px",borderRadius:12,border:"2px solid "+(sections.includes(sk)?sec.color:bd),background:sections.includes(sk)?sec.color+"18":"transparent",color:sections.includes(sk)?sec.color:stx,fontWeight:sections.includes(sk)?700:500,fontSize:13,cursor:"pointer",minHeight:"auto"}},sec.name+" ("+sec.area+")")})),
 
-      // Product
+      // Changement #4: Produits par catégorie depuis Agro Berry
       React.createElement("label",{style:{...lbl,marginTop:8}},"🧪 Produit *"),
-      React.createElement("select",{value:product,onChange:e=>setProduct(e.target.value),style:{...is,marginBottom:12}},
-        React.createElement("option",{value:""},"— Choisir —"),
-        PRODUCTS.map(p=>React.createElement("option",{key:p,value:p},p))),
+      React.createElement("select",{value:product,onChange:e=>{setProduct(e.target.value);if(e.target.value!=="__autre__")setCustomProd("")},style:{...is,marginBottom:product==="__autre__"?8:12}},
+        React.createElement("option",{value:""},"— Choisir un produit —"),
+        Object.entries(PRODUCT_CATEGORIES).map(([cat,prods])=>
+          React.createElement("optgroup",{key:cat,label:"📦 "+cat},
+            prods.map(p=>React.createElement("option",{key:p,value:p},p)))),
+        customProducts.length>0&&React.createElement("optgroup",{label:"🏷️ Mes produits"},
+          customProducts.map(p=>React.createElement("option",{key:p,value:p},p))),
+        React.createElement("option",{value:"__autre__"},"➕ Autre produit...")),
+      
+      // Changement #5: Champ texte si "Autre" sélectionné
+      product==="__autre__"&&React.createElement("input",{placeholder:"Nom du nouveau produit...",value:customProd,onChange:e=>setCustomProd(e.target.value),style:{...is,marginBottom:12,borderColor:"#F59E0B"}}),
 
       // Dose
       React.createElement("label",{style:lbl},"📏 Dose *"),
@@ -459,7 +558,7 @@ function InjectionForm({bg,cbg,ctx,stx,bd,dark,groupFilter,onSubmit,onClose}){
 }
 
 // ===== SETTINGS =====
-function Settings({bg,cbg,ctx,stx,bd,dark,ghCfg,setGhCfg,sync,restore,syncSt,injections,setInj,t}){
+function Settings({bg,cbg,ctx,stx,bd,dark,ghCfg,setGhCfg,sync,restore,syncSt,injections,setInj,customProducts,setCustomProducts,t}){
   const is={width:"100%",padding:"13px 14px",borderRadius:14,border:"2px solid "+bd,fontSize:15,outline:"none",background:cbg,color:ctx};
   const lbl={fontSize:12,fontWeight:700,color:stx,marginBottom:5,display:"block"};
   return React.createElement("div",{style:{animation:"fadeIn 0.3s"}},
@@ -478,6 +577,14 @@ function Settings({bg,cbg,ctx,stx,bd,dark,ghCfg,setGhCfg,sync,restore,syncSt,inj
         React.createElement("button",{onClick:sync,disabled:syncSt==="sync",style:{flex:1,padding:14,borderRadius:14,border:"none",background:syncSt==="sync"?"#94A3B8":"linear-gradient(135deg,#0EA5E9,#0284C7)",color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer"}},syncSt==="sync"?"⏳ Sauvegarde...":"☁️ Sauvegarder"),
         React.createElement("button",{onClick:restore,disabled:syncSt==="restore",style:{flex:1,padding:14,borderRadius:14,border:"2px solid #0EA5E9",background:"transparent",color:"#0EA5E9",fontWeight:700,fontSize:14,cursor:"pointer"}},syncSt==="restore"?"⏳ Restauration...":"📥 Restaurer"))),
 
+    // Custom products
+    customProducts.length>0&&React.createElement("div",{style:{background:cbg,borderRadius:18,padding:18,border:"1px solid "+bd,marginBottom:14}},
+      React.createElement("h3",{style:{fontSize:15,fontWeight:700,marginBottom:12}},"🏷️ Mes produits personnalisés ("+customProducts.length+")"),
+      React.createElement("div",{style:{display:"flex",flexWrap:"wrap",gap:8}},
+        customProducts.map((p,i)=>React.createElement("span",{key:i,style:{display:"flex",alignItems:"center",gap:6,padding:"8px 14px",borderRadius:20,background:dark?"#334155":"#F1F5F9",fontSize:12,fontWeight:600}},
+          p,
+          React.createElement("button",{onClick:()=>{setCustomProducts(prev=>prev.filter((_,idx)=>idx!==i))},style:{background:"none",border:"none",fontSize:14,cursor:"pointer",color:"#EF4444",padding:0,minHeight:"auto"}},"✕"))))),
+
     // Stats
     React.createElement("div",{style:{background:cbg,borderRadius:18,padding:18,border:"1px solid "+bd,marginBottom:14}},
       React.createElement("h3",{style:{fontSize:15,fontWeight:700,marginBottom:12}},"📊 Statistiques"),
@@ -491,12 +598,12 @@ function Settings({bg,cbg,ctx,stx,bd,dark,ghCfg,setGhCfg,sync,restore,syncSt,inj
     React.createElement("div",{style:{background:cbg,borderRadius:18,padding:18,border:"1px solid "+bd,marginBottom:14}},
       React.createElement("h3",{style:{fontSize:15,fontWeight:700,marginBottom:12}},"📥 Export"),
       React.createElement("button",{onClick:()=>exportExcel(injections),style:{width:"100%",padding:14,borderRadius:14,border:"none",background:"linear-gradient(135deg,#10B981,#059669)",color:"#fff",fontWeight:700,fontSize:14,cursor:"pointer",marginBottom:10}},"📥 Exporter en Excel (CSV)"),
-      React.createElement("button",{onClick:()=>{const d=JSON.stringify({injections,exportedAt:new Date().toISOString()},null,2);const b=new Blob([d],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="irrigation-backup-"+new Date().toISOString().split("T")[0]+".json";a.click()},style:{width:"100%",padding:14,borderRadius:14,border:"2px solid "+bd,background:"transparent",color:ctx,fontWeight:700,fontSize:14,cursor:"pointer"}},"💾 Exporter JSON (backup)")),
+      React.createElement("button",{onClick:()=>{const d=JSON.stringify({injections,customProducts,exportedAt:new Date().toISOString()},null,2);const b=new Blob([d],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="irrigation-backup-"+new Date().toISOString().split("T")[0]+".json";a.click()},style:{width:"100%",padding:14,borderRadius:14,border:"2px solid "+bd,background:"transparent",color:ctx,fontWeight:700,fontSize:14,cursor:"pointer"}},"💾 Exporter JSON (backup)")),
 
     // Danger zone
     React.createElement("div",{style:{background:dark?"#2A1015":"#FEF2F2",borderRadius:18,padding:18,border:"1px solid "+(dark?"#5C2020":"#FECACA")}},
       React.createElement("h3",{style:{fontSize:15,fontWeight:700,color:"#DC2626",marginBottom:12}},"⚠️ Zone danger"),
-      React.createElement("button",{onClick:()=>{if(confirm("SUPPRIMER TOUTES LES DONNÉES ?")){setInj([]);t("Données supprimées")}},style:{width:"100%",padding:14,borderRadius:14,border:"1px solid #DC2626",background:"transparent",color:"#DC2626",fontSize:14,fontWeight:600,cursor:"pointer"}},"🗑️ Tout supprimer")),
+      React.createElement("button",{onClick:()=>{if(confirm("⚠️ SUPPRIMER TOUTES LES DONNÉES ?\n\nCette action est irréversible !")){setInj([]);setCustomProducts([]);t("Données supprimées")}},style:{width:"100%",padding:14,borderRadius:14,border:"1px solid #DC2626",background:"transparent",color:"#DC2626",fontSize:14,fontWeight:600,cursor:"pointer"}},"🗑️ Tout supprimer")),
 
     // Version
     React.createElement("div",{style:{textAlign:"center",padding:18,color:stx,fontSize:11}},"Agro Berry Irrigation v"+VER+" • Ferme Zaouia"));
