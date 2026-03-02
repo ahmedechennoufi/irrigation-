@@ -6,10 +6,9 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#0C4A6E">
-  <link rel="apple-touch-icon" href="icon-192x192.png">
   <title>Agro Berry — Suivi Irrigation</title>
   <link rel="manifest" href="manifest.json">
-  <link rel="icon" href="icon-192x192.png">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💧</text></svg>">
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0}
@@ -235,7 +234,7 @@ function App(){
     // HEADER
     React.createElement("header",{style:{background:"linear-gradient(135deg,#0C4A6E,#0369A1)",padding:"16px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}},
       React.createElement("div",{style:{display:"flex",alignItems:"center",gap:12}},
-        React.createElement("img",{src:"icon-192x192.png",alt:"AB",style:{width:38,height:38,borderRadius:12},onError:e=>{e.target.style.display="none"}}),
+        React.createElement("div",{style:{width:38,height:38,borderRadius:12,background:"linear-gradient(135deg,#0EA5E9,#0284C7)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:19}},"💧"),
         React.createElement("div",null,
           React.createElement("h1",{style:{color:"#fff",fontSize:17,fontWeight:800,margin:0,letterSpacing:"-0.3px"}},"AGRO BERRY"),
           React.createElement("p",{style:{color:"#7DD3FC",fontSize:10,margin:0}},"Suivi Irrigation • Ferme Zaouia"))),
